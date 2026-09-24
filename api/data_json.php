@@ -12,41 +12,49 @@ header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');        // izinkan fetch dari origin manapun (untuk praktik)
 header('Access-Control-Allow-Methods: GET');     // hanya izinkan method GET
 
-// --- Koneksi database ---
+// --- Koneksi database dan filter bersama ---
 include '../config/koneksi.php';
+include '../config/filter_buku.php';
 
-// --- Ambil parameter (opsional, untuk fitur tambahan) ---
-// Contoh: ?kategori=Novel  → filter berdasarkan kategori
-$kategori = isset($_GET['kategori']) ? trim($_GET['kategori']) : '';
-$search   = isset($_GET['search'])   ? trim($_GET['search'])   : '';
+// --- Ambil parameter ---
+$filter = buildBukuFilter();
+$where  = $filter['where'];
+$params = $filter['params'];
+$types  = $filter['types'];
+$page     = isset($_GET['page']) ? max(1, (int) $_GET['page']) : 1;
+$per_page = 10;
 
-// --- Susun query dasar ---
+// --- Hitung total data hasil filter ---
+$count_sql = "SELECT COUNT(*) AS total FROM books" . $where;
+
+if (!empty($params)) {
+    $count_stmt = mysqli_prepare($conn, $count_sql);
+    mysqli_stmt_bind_param($count_stmt, $types, ...$params);
+    mysqli_stmt_execute($count_stmt);
+    $count_result = mysqli_stmt_get_result($count_stmt);
+} else {
+    $count_result = mysqli_query($conn, $count_sql);
+}
+
+$count_row     = mysqli_fetch_assoc($count_result);
+$total         = (int) ($count_row['total'] ?? 0);
+mysqli_free_result($count_result);
+
+if (isset($count_stmt)) {
+    mysqli_stmt_close($count_stmt);
+}
+
+// Pastikan halaman yang diminta tidak melewati jumlah halaman yang tersedia.
+$total_pages = max(1, (int) ceil($total / $per_page));
+if ($page > $total_pages) {
+    $page = $total_pages;
+}
+$offset = ($page - 1) * $per_page;
+
+// --- Ambil data untuk halaman ini ---
 $sql = "SELECT id, kode_buku, judul, penulis, kategori, tahun_terbit, penerbit, foto
-        FROM books 
-        WHERE 1=1";
+        FROM books" . $where . " ORDER BY id ASC LIMIT $per_page OFFSET $offset";
 
-// --- Tambahkan filter kalau ada parameter ---
-$params = [];
-$types  = "";
-
-if ($kategori !== "") {
-    $sql .= " AND kategori = ?";
-    $params[] = $kategori;
-    $types   .= "s";
-}
-
-if ($search !== "") {
-    $sql .= " AND (judul LIKE ? OR penulis LIKE ? OR kode_buku LIKE ?)";
-    $like = "%" . $search . "%";
-    $params[] = $like;
-    $params[] = $like;
-    $params[] = $like;
-    $types   .= "sss";
-}
-
-$sql .= " ORDER BY id ASC";
-
-// --- Eksekusi query (prepared statement kalau ada filter) ---
 if (!empty($params)) {
     $stmt = mysqli_prepare($conn, $sql);
     mysqli_stmt_bind_param($stmt, $types, ...$params);
@@ -65,11 +73,18 @@ while ($row = mysqli_fetch_assoc($result)) {
     $data[] = $row;
 }
 
+if (isset($stmt)) {
+    mysqli_stmt_close($stmt);
+}
+
 // --- Output JSON ---
 echo json_encode([
-    'status'  => 'success',
-    'total'   => count($data),
-    'data'    => $data
+    'status'      => 'success',
+    'total'       => $total,
+    'page'        => $page,
+    'per_page'    => $per_page,
+    'total_pages' => $total_pages,
+    'data'        => $data
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
 
 // --- Tutup koneksi ---

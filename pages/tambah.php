@@ -54,7 +54,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $kode_buku, $judul, $penulis, $kategori, $tahun_terbit, $penerbit, $foto);
 
             if (mysqli_stmt_execute($stmt)) {
-                $success = "Buku berhasil ditambahkan!";
+                header("Location: data_buku.php");
+    exit;
                 // Reset form
                 $_POST = [];
             } else {

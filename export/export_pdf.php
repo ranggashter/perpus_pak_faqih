@@ -10,6 +10,7 @@
 
 include '../config/auth.php';
 include '../config/koneksi.php';
+include '../config/filter_buku.php';
 
 require '../vendor/autoload.php';
 
@@ -17,10 +18,19 @@ use Dompdf\Dompdf;
 use Dompdf\Options;
 
 // ============================================
-// 1. Ambil data dari database
+// 1. Ambil data dari database dengan filter yang sama dengan tabel
 // ============================================
-$query  = "SELECT * FROM books ORDER BY id ASC";
-$result = mysqli_query($conn, $query);
+$filter = buildBukuFilter();
+$query  = "SELECT * FROM books" . $filter['where'] . " ORDER BY id ASC";
+
+if (!empty($filter['params'])) {
+    $stmt = mysqli_prepare($conn, $query);
+    mysqli_stmt_bind_param($stmt, $filter['types'], ...$filter['params']);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+} else {
+    $result = mysqli_query($conn, $query);
+}
 
 $buku_list = [];
 while ($row = mysqli_fetch_assoc($result)) {
@@ -41,6 +51,17 @@ $bulan_id = [
     9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
 ];
 $tanggal_cetak = date('d') . ' ' . $bulan_id[(int)date('n')] . ' ' . date('Y, H:i') . ' WIB';
+
+$filter_description = [];
+if ($filter['search'] !== '') {
+    $filter_description[] = 'Pencarian: ' . $filter['search'];
+}
+if ($filter['kategori'] !== '') {
+    $filter_description[] = 'Kategori: ' . $filter['kategori'];
+}
+$filter_description = !empty($filter_description)
+    ? implode(' | ', $filter_description)
+    : 'Semua data';
 
 // ============================================
 // 3. Bangun HTML untuk PDF
@@ -203,7 +224,11 @@ $html = '
             </tr>
             <tr>
                 <td>Dicetak Oleh</td>
-                <td>: ' . htmlspecialchars($dicetak_oleh) . '</td>
+                <td>: ' . htmlspecialchars($dicetak_oleh, ENT_QUOTES, 'UTF-8') . '</td>
+            </tr>
+            <tr>
+                <td>Filter</td>
+                <td>: ' . htmlspecialchars($filter_description, ENT_QUOTES, 'UTF-8') . '</td>
             </tr>
         </table>
     </div>
@@ -270,6 +295,11 @@ $html .= '
 </body>
 </html>
 ';
+
+// Tutup statement setelah selesai digunakan.
+if (isset($stmt)) {
+    mysqli_stmt_close($stmt);
+}
 
 // ============================================
 // 4. Render PDF dengan Dompdf

@@ -279,6 +279,47 @@ $q_kat = mysqli_query($conn, "SELECT DISTINCT kategori FROM books ORDER BY kateg
             justify-content: center;
         }
 
+        /* ============ PAGINATION ============ */
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 16px;
+        }
+        .pagination button {
+            min-width: 34px;
+            height: 34px;
+            padding: 6px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            background: #ffffff;
+            color: #374151;
+            font-family: inherit;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .pagination button:hover:not(:disabled) {
+            background: #f3f4f6;
+            border-color: #9ca3af;
+        }
+        .pagination button.active {
+            background: #1e40af;
+            border-color: #1e40af;
+            color: #ffffff;
+            font-weight: 600;
+        }
+        .pagination button:disabled {
+            color: #9ca3af;
+            background: #f9fafb;
+            cursor: not-allowed;
+        }
+        .pagination .ellipsis {
+            padding: 0 2px;
+            color: #6b7280;
+        }
+
         /* ============ RESPONSIVE ============ */
         @media (max-width: 768px) {
             .navbar {
@@ -318,8 +359,8 @@ $q_kat = mysqli_query($conn, "SELECT DISTINCT kategori FROM books ORDER BY kateg
             <a href="data_buku.php" class="active">Data Buku</a>
             <a href="users.php">user</a>
             <a href="tambah.php">Tambah Buku</a>
-            <a href="../export/export_excel.php">Export Excel</a>
-            <a href="../export/export_pdf.php">Export PDF</a>
+            <a href="../export/export_excel.php" data-export="excel" data-base-export="../export/export_excel.php">Export Excel</a>
+            <a href="../export/export_pdf.php" data-export="pdf" data-base-export="../export/export_pdf.php">Export PDF</a>
             <a href="../auth/logout.php" onclick="return confirm('Yakin mau logout?')">Logout</a>
         </div>
     </div>
@@ -346,8 +387,8 @@ $q_kat = mysqli_query($conn, "SELECT DISTINCT kategori FROM books ORDER BY kateg
             <button class="btn btn-primary" onclick="loadData()">Cari</button>
             <button class="btn btn-secondary" onclick="resetFilter()">Reset</button>
             <div class="spacer"></div>
-            <a href="../export/export_excel.php" class="btn btn-secondary">Export Excel</a>
-            <a href="../export/export_pdf.php" class="btn btn-secondary">Export PDF</a>
+            <a href="../export/export_excel.php" data-export="excel" data-base-export="../export/export_excel.php" class="btn btn-secondary">Export Excel</a>
+            <a href="../export/export_pdf.php" data-export="pdf" data-base-export="../export/export_pdf.php" class="btn btn-secondary">Export PDF</a>
         </div>
 
         <!-- Info total -->
@@ -377,6 +418,9 @@ $q_kat = mysqli_query($conn, "SELECT DISTINCT kategori FROM books ORDER BY kateg
             </table>
         </div>
 
+        <!-- Pagination: 10 data per halaman -->
+        <div class="pagination" id="pagination" aria-label="Pagination"></div>
+
     </div>
 
     <script>
@@ -385,11 +429,39 @@ $q_kat = mysqli_query($conn, "SELECT DISTINCT kategori FROM books ORDER BY kateg
     // ============================================
     const API_URL   = '../api/data_json.php';
     const IS_ADMIN  = <?= $is_admin ? 'true' : 'false' ?>;
+    const PER_PAGE  = 10;
+    let currentPage = 1;
+
+    // ============================================
+    // FUNGSI: Bangun URL export sesuai filter aktif
+    // ============================================
+    function buildExportQuery() {
+        const search = document.getElementById('inputSearch').value.trim();
+        const kategori = document.getElementById('filterKategori').value;
+        const params = [];
+
+        if (search)   params.push('search=' + encodeURIComponent(search));
+        if (kategori) params.push('kategori=' + encodeURIComponent(kategori));
+
+        return params.length ? '?' + params.join('&') : '';
+    }
+
+    function updateExportLinks() {
+        const query = buildExportQuery();
+        document.querySelectorAll('[data-export]').forEach(link => {
+            const base = link.getAttribute('data-base-export');
+            if (base) link.setAttribute('href', base + query);
+        });
+    }
 
     // ============================================
     // FUNGSI: Ambil & tampilkan data
     // ============================================
-    function loadData() {
+    function loadData(page = 1) {
+        updateExportLinks();
+        const requestedPage = parseInt(page, 10);
+        currentPage = (!isNaN(requestedPage) && requestedPage > 0) ? requestedPage : 1;
+
         const search   = document.getElementById('inputSearch').value.trim();
         const kategori = document.getElementById('filterKategori').value;
 
@@ -398,11 +470,14 @@ $q_kat = mysqli_query($conn, "SELECT DISTINCT kategori FROM books ORDER BY kateg
         const params = [];
         if (search)   params.push('search='   + encodeURIComponent(search));
         if (kategori) params.push('kategori=' + encodeURIComponent(kategori));
-        if (params.length > 0) url += '?' + params.join('&');
+        params.push('page=' + currentPage);
+        url += '?' + params.join('&');
 
         // Tampilkan loading
         const tbody = document.getElementById('tbodyBuku');
+        const pagination = document.getElementById('pagination');
         tbody.innerHTML = '<tr><td colspan="9" class="loading">Memuat data...</td></tr>';
+        pagination.innerHTML = '';
 
         // Fetch API
         fetch(url)
@@ -412,10 +487,19 @@ $q_kat = mysqli_query($conn, "SELECT DISTINCT kategori FROM books ORDER BY kateg
             })
             .then(result => {
                 const data = result.data || [];
-                document.getElementById('totalData').textContent = result.total || 0;
+                const total = Number(result.total) || 0;
+                const totalPages = Number(result.total_pages) || Math.max(1, Math.ceil(total / PER_PAGE));
+                const perPage = Number(result.per_page) || PER_PAGE;
+                const responsePage = parseInt(result.page, 10);
+
+                if (!isNaN(responsePage) && responsePage > 0) {
+                    currentPage = responsePage;
+                }
+                document.getElementById('totalData').textContent = total;
 
                 if (data.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="9" class="empty">Tidak ada data ditemukan</td></tr>';
+                    pagination.innerHTML = '';
                     return;
                 }
 
@@ -437,7 +521,7 @@ $q_kat = mysqli_query($conn, "SELECT DISTINCT kategori FROM books ORDER BY kateg
 
                     html += `
                         <tr>
-                            <td>${index + 1}</td>
+                            <td>${(currentPage - 1) * perPage + index + 1}</td>
                             <td>${fotoHtml}</td>
                             <td><strong>${escapeHtml(buku.kode_buku)}</strong></td>
                             <td>${escapeHtml(buku.judul)}</td>
@@ -455,11 +539,53 @@ $q_kat = mysqli_query($conn, "SELECT DISTINCT kategori FROM books ORDER BY kateg
                     `;
                 });
                 tbody.innerHTML = html;
+                renderPagination(currentPage, totalPages);
             })
             .catch(error => {
                 console.error('Error:', error);
+                pagination.innerHTML = '';
                 tbody.innerHTML = '<tr><td colspan="9" class="empty empty-error">Gagal memuat data: ' + error.message + '</td></tr>';
             });
+    }
+
+    // ============================================
+    // FUNGSI: Render pagination
+    // ============================================
+    function renderPagination(page, totalPages) {
+        const pagination = document.getElementById('pagination');
+        if (!pagination || totalPages <= 1) {
+            if (pagination) pagination.innerHTML = '';
+            return;
+        }
+
+        const items = [];
+        const addButton = (label, targetPage, disabled = false, active = false) => {
+            const current = active ? ' active' : '';
+            const ariaCurrent = active ? ' aria-current="page"' : '';
+            const disabledAttr = disabled ? ' disabled' : '';
+            items.push(
+                `<button type="button" class="pagination-btn${current}" onclick="loadData(${targetPage})"${ariaCurrent}${disabledAttr}>${label}</button>`
+            );
+        };
+
+        addButton('‹ Prev', page - 1, page <= 1);
+        addButton('1', 1, false, page === 1);
+
+        const start = Math.max(2, page - 2);
+        const end = Math.min(totalPages - 1, page + 2);
+        if (start > 2) items.push('<span class="ellipsis">…</span>');
+
+        for (let itemPage = start; itemPage <= end; itemPage++) {
+            addButton(String(itemPage), itemPage, false, itemPage === page);
+        }
+
+        if (end < totalPages - 1) items.push('<span class="ellipsis">…</span>');
+        if (totalPages > 1) {
+            addButton(String(totalPages), totalPages, false, page === totalPages);
+        }
+        addButton('Next ›', page + 1, page >= totalPages);
+
+        pagination.innerHTML = items.join('');
     }
 
     // ============================================
@@ -488,6 +614,10 @@ $q_kat = mysqli_query($conn, "SELECT DISTINCT kategori FROM books ORDER BY kateg
     // AUTO LOAD saat halaman dibuka
     // ============================================
     document.addEventListener('DOMContentLoaded', loadData);
+
+    // Filter export diperbarui saat nilai kontrol berubah.
+    document.getElementById('inputSearch').addEventListener('input', updateExportLinks);
+    document.getElementById('filterKategori').addEventListener('change', updateExportLinks);
 
     // ============================================
     // Enter di kolom search → langsung cari
